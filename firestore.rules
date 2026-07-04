@@ -1,0 +1,9 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Only Damian & Marta's app (signed in anonymously) can read/write the one shared household document.
+    match /household/{docId} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
