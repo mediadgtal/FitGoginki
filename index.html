@@ -111,7 +111,9 @@
   .app-shell {
     max-width: 1180px;
     margin: 0 auto;
-    padding: 24px 20px 80px;
+    /* iOS PWA status bar is translucent (content draws under it) — keep the header clear of the
+       notch/status-bar/dynamic-island area using the safe-area inset, with a sane fallback. */
+    padding: max(24px, env(safe-area-inset-top)) 20px 80px;
   }
 
   header.top {
@@ -126,6 +128,7 @@
   }
   header.top .brand { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   header.top .brand-row { display: flex; align-items: center; gap: 10px; }
+  .brand-icon { border-radius: 10px; flex: none; }
   header.top h1 { font-size: 26px; margin: 0; }
   header.top .sub { color: var(--ink-soft); font-size: 13.5px; }
   .theme-toggle { flex: none; }
@@ -230,6 +233,20 @@
     font-size: 13px;
     white-space: nowrap;
   }
+
+  .alpha-row { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 16px; }
+  .alpha-btn {
+    border: 1px solid var(--line);
+    background: var(--bg-raised);
+    color: var(--ink-soft);
+    border-radius: 7px;
+    width: 26px; height: 26px;
+    font-size: 12.5px;
+    font-weight: 700;
+    padding: 0;
+    flex: none;
+  }
+  .alpha-btn.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 
   .grid {
     display: grid;
@@ -576,6 +593,7 @@
   <header class="top">
     <div class="brand">
       <div class="brand-row">
+        <img src="./icons/icon-192.png" alt="" class="brand-icon" width="36" height="36" />
         <h1>FitGoginki</h1>
         <button class="icon-btn theme-toggle" id="themeToggle" aria-label="Przełącz jasny/ciemny motyw" title="Jasny / ciemny motyw">🌙</button>
       </div>
@@ -610,9 +628,9 @@
       </select>
       <select id="mealTypeSelect">
         <option value="">Wszystkie kategorie</option>
-        <option value="Śniadanie">Śniadania</option>
+        <option value="Śniadanie">Na słodko</option>
         <option value="Obiad">Obiady</option>
-        <option value="Kolacja">Kolacje</option>
+        <option value="Kolacja">Wytrawne</option>
         <option value="Deser">Desery</option>
         <option value="Zupa">Zupy</option>
         <option value="Sałatka">Sałatki i surówki</option>
@@ -628,6 +646,7 @@
       <button class="pill-btn" id="trashBtn">🗑 Kosz</button>
       <span class="count-tag" id="resultCount"></span>
     </div>
+    <div class="alpha-row" id="alphaRow"></div>
     <div class="grid" id="recipeGrid"></div>
   </section>
 
@@ -751,6 +770,10 @@
   // Categories a recipe can be filed under when browsing (wider than the 3 daily MEALS slots,
   // so dish-type recipes like desery/zupy from FitPatka's "udostępnione" collections have a home too).
   const CATEGORIES = ["Śniadanie","Obiad","Kolacja","Deser","Zupa","Sałatka","Napój","Pasta","Przekąska"];
+  // Display labels shown to the user — the underlying values stay "Śniadanie"/"Kolacja" so they still
+  // line up with the original FitPatka plan data (mealTypesOf) and the week planner's daily slots.
+  const CATEGORY_LABELS = { "Śniadanie": "Na słodko", "Kolacja": "Wytrawne" };
+  const categoryLabel = (c) => CATEGORY_LABELS[c] || c;
   const PEOPLE = ["Damian", "Marta"];
   const DAY_LABELS = ["Pon","Wt","Śr","Czw","Pt","Sob","Nd"];
   const DAY_NAMES_FULL = ["Niedziela","Poniedziałek","Wtorek","Środa","Czwartek","Piątek","Sobota"];
@@ -778,21 +801,34 @@
   }
   let cloudReady = false;
   let pushTimer = null;
+  function doPushNow() {
+    pushTimer = null;
+    setDoc(SHARED_DOC, {
+      favorites: Array.from(favorites),
+      weekPlan, checked: Array.from(checked), recipeOverrides, monthNames,
+      shopOverrides, customShopItems, customStats,
+      updatedAt: Date.now(),
+    }, { merge: true }).then(
+      () => setSyncStatus("✅", "Zsynchronizowano z Martą/Damianem — dane na żywo między urządzeniami."),
+      () => setSyncStatus("⚠️", "Nie udało się zapisać w chmurze — sprawdź połączenie z internetem. Zmiany zostały zapisane lokalnie.")
+    );
+  }
   function pushToCloud() {
     if (!cloudReady) return;
     clearTimeout(pushTimer);
-    pushTimer = setTimeout(() => {
-      setDoc(SHARED_DOC, {
-        favorites: Array.from(favorites),
-        weekPlan, checked: Array.from(checked), recipeOverrides, monthNames,
-        shopOverrides, customShopItems, customStats,
-        updatedAt: Date.now(),
-      }, { merge: true }).then(
-        () => setSyncStatus("✅", "Zsynchronizowano z Martą/Damianem — dane na żywo między urządzeniami."),
-        () => setSyncStatus("⚠️", "Nie udało się zapisać w chmurze — sprawdź połączenie z internetem. Zmiany zostały zapisane lokalnie.")
-      );
-    }, 500);
+    pushTimer = setTimeout(doPushNow, 500);
   }
+  // Debouncing batches rapid successive edits into one write, but that also means a pending write
+  // can be silently lost if the tab/app is closed within that window (e.g. right after restoring a
+  // recipe from the trash). Flush immediately whenever the page is about to go away or hide.
+  function flushPendingPush() {
+    if (pushTimer) {
+      clearTimeout(pushTimer);
+      doPushNow();
+    }
+  }
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushPendingPush(); });
+  window.addEventListener("pagehide", flushPendingPush);
   function applyRemote(data) {
     favorites = new Set(data.favorites || []);
     weekPlan = data.weekPlan || {};
@@ -823,15 +859,25 @@
   const PHOTOS_DOC = doc(fbDb, "household", "photos");
   let photosCloudReady = false;
   let photosPushTimer = null;
+  function doPushPhotosNow() {
+    photosPushTimer = null;
+    setDoc(PHOTOS_DOC, { photos: photoOverrides, updatedAt: Date.now() }, { merge: false }).catch(() => {
+      showToast("Nie udało się zapisać zdjęcia w chmurze (za duże?). Zostało zapisane tylko lokalnie.");
+    });
+  }
   function pushPhotosToCloud() {
     if (!photosCloudReady) return;
     clearTimeout(photosPushTimer);
-    photosPushTimer = setTimeout(() => {
-      setDoc(PHOTOS_DOC, { photos: photoOverrides, updatedAt: Date.now() }, { merge: false }).catch(() => {
-        showToast("Nie udało się zapisać zdjęcia w chmurze (za duże?). Zostało zapisane tylko lokalnie.");
-      });
-    }, 500);
+    photosPushTimer = setTimeout(doPushPhotosNow, 500);
   }
+  function flushPendingPhotosPush() {
+    if (photosPushTimer) {
+      clearTimeout(photosPushTimer);
+      doPushPhotosNow();
+    }
+  }
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushPendingPhotosPush(); });
+  window.addEventListener("pagehide", flushPendingPhotosPush);
   function applyRemotePhotos(data) {
     photoOverrides = (data && data.photos) || {};
     saveLocal(LS_PHOTOS, photoOverrides);
@@ -1226,6 +1272,13 @@
     return r.ingredients.some(i => i.name.toLowerCase().includes(q));
   }
 
+  // First letter of a recipe name, with Polish diacritics folded to their plain A-Z equivalent
+  // (Ś→S, Ć→C, Ł→L, …) so the A-Z quick-jump row also catches those recipes.
+  function alphaKey(name) {
+    const folded = name.trim().charAt(0).toUpperCase().replace(/\u0141/g, "L").normalize("NFD");
+    return folded.replace(/[\u0300-\u036f]/g, "");
+  }
+
   function sortList(list, sort) {
     if (sort === "name") list.sort((a,b) => a.name.localeCompare(b.name, "pl"));
     if (sort === "kcal-asc") list.sort((a,b) => a.kcal - b.kcal);
@@ -1236,7 +1289,7 @@
   }
 
   // Shared filter used by both the main recipe grid and the week-planner picker.
-  function filterRecipes({ query = "", sort = "name", dietId = "", mealType = "", onlyFav = false } = {}) {
+  function filterRecipes({ query = "", sort = "name", dietId = "", mealType = "", onlyFav = false, letter = "" } = {}) {
     let list = effectiveRecipes();
     if (dietId) {
       const ids = recipeIdsForDiet(dietId);
@@ -1244,10 +1297,12 @@
     }
     if (mealType) list = list.filter(r => effectiveMealTypes(r.id).has(mealType));
     if (onlyFav) list = list.filter(r => favorites.has(r.id));
+    if (letter) list = list.filter(r => alphaKey(r.name) === letter);
     list = list.filter(r => matchesSearch(r, query.trim()));
     return sortList(list, sort);
   }
 
+  let alphaLetter = "";
   function currentList() {
     return filterRecipes({
       query: searchInput.value,
@@ -1255,16 +1310,21 @@
       dietId: dietSelect.value,
       mealType: mealTypeSelect.value,
       onlyFav: onlyFavorites,
+      letter: alphaLetter,
     });
   }
 
   function renderGrid() {
+    // Rebuilding the grid briefly collapses its height, which can make the browser clamp/lose the
+    // scroll position (e.g. right after editing a recipe deep in a long list) — restore it explicitly.
+    const scrollY = window.scrollY;
     const list = currentList();
     resultCount.textContent = list.length + (list.length === 1 ? " przepis" : " przepisów");
     updateTrashButton();
     grid.innerHTML = "";
     if (list.length === 0) {
       grid.innerHTML = '<div class="empty-state">Brak przepisów spełniających kryteria.</div>';
+      window.scrollTo(0, scrollY);
       return;
     }
     const frag = document.createDocumentFragment();
@@ -1298,6 +1358,7 @@
       frag.appendChild(card);
     });
     grid.appendChild(frag);
+    window.scrollTo(0, scrollY);
   }
 
   function toggleFavorite(id) {
@@ -1344,7 +1405,7 @@
         <p style="font-size:13px;color:var(--ink-soft);margin-top:0;">Usunięte przepisy czekają tu 30 dni, zanim znikną całkowicie.</p>
         <div class="picker-list" id="trashList">
           ${items.length === 0 ? '<div class="empty-state">Kosz jest pusty.</div>' : items.map(x => `
-            <div class="picker-row-item" style="cursor:default;" data-id="${x.id}">
+            <div class="picker-row-item trash-row" data-id="${x.id}">
               <span class="prname">${escapeHtml(x.recipe.name)}</span>
               <span class="prmacro">zostało ${daysLeftInTrash(x.deletedAt)} dni</span>
               <button class="btn primary trash-restore-btn" data-id="${x.id}">Przywróć</button>
@@ -1357,9 +1418,11 @@
     const close = () => bd.remove();
     bd.addEventListener("click", (e) => { if (e.target === bd) close(); });
     bd.querySelector(".modal-close").addEventListener("click", close);
-    bd.querySelectorAll(".trash-restore-btn").forEach(btn => {
-      btn.addEventListener("click", () => {
-        const id = Number(btn.dataset.id);
+    // The whole row (not just the small button) restores — much easier to hit on a phone.
+    bd.querySelectorAll(".trash-row").forEach(row => {
+      row.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const id = Number(row.dataset.id);
         const recipe = recipeById.get(id);
         restoreRecipeFromTrash(id);
         renderGrid();
@@ -1369,6 +1432,21 @@
     });
   }
   trashBtn.addEventListener("click", openTrashModal);
+
+  // ---------- A-Z quick-jump row ----------
+  const alphaRow = document.getElementById("alphaRow");
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").forEach(letter => {
+    const btn = document.createElement("button");
+    btn.className = "alpha-btn";
+    btn.type = "button";
+    btn.textContent = letter;
+    btn.addEventListener("click", () => {
+      alphaLetter = alphaLetter === letter ? "" : letter;
+      alphaRow.querySelectorAll(".alpha-btn").forEach(b => b.classList.toggle("active", b.textContent === alphaLetter));
+      renderGrid();
+    });
+    alphaRow.appendChild(btn);
+  });
 
   // ---------- Detail modal (view + edit) ----------
   let backdrop = null;
@@ -1392,7 +1470,7 @@
     const mealOptions = MEALS.map(m => `<option value="${m}">${m}</option>`).join("");
     const photoUrl = getPhotoUrl(r);
     const currentCategory = [...effectiveMealTypes(r.id)][0] || "";
-    const categoryOptions = `<option value="">— wybierz —</option>` + CATEGORIES.map(c => `<option value="${c}" ${c === currentCategory ? "selected" : ""}>${c}</option>`).join("");
+    const categoryOptions = `<option value="">— wybierz —</option>` + CATEGORIES.map(c => `<option value="${c}" ${c === currentCategory ? "selected" : ""}>${escapeHtml(categoryLabel(c))}</option>`).join("");
     backdrop.innerHTML = `
       <div class="modal" role="dialog" aria-modal="true">
         <div class="modal-head">
@@ -1731,10 +1809,16 @@
             <option value="protein-asc">Białko: najmniej</option>
           </select>
           <select id="pkMealType">
-            <option value="">Wszystkie posiłki</option>
-            <option value="Śniadanie">Śniadania</option>
+            <option value="">Wszystkie kategorie</option>
+            <option value="Śniadanie">Na słodko</option>
             <option value="Obiad">Obiady</option>
-            <option value="Kolacja">Kolacje</option>
+            <option value="Kolacja">Wytrawne</option>
+            <option value="Deser">Desery</option>
+            <option value="Zupa">Zupy</option>
+            <option value="Sałatka">Sałatki i surówki</option>
+            <option value="Napój">Koktajle i napoje</option>
+            <option value="Pasta">Pasty</option>
+            <option value="Przekąska">Przekąski</option>
           </select>
           <select id="pkDiet"></select>
           <button class="pill-btn" id="pkFav">♥ Tylko ulubione</button>

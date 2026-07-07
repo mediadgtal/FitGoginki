@@ -33,7 +33,7 @@ self.addEventListener("fetch", (event) => {
   // immediately instead of needing a manual cache-version bump), falling back to the cached copy
   // only when there's no connection.
   event.respondWith(
-    fetch(req)
+    fetch(req, { cache: "no-store" })
       .then((res) => {
         if (res && res.status === 200) {
           const clone = res.clone();
