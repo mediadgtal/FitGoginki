@@ -803,9 +803,12 @@
   let pushTimer = null;
   function doPushNow() {
     pushTimer = null;
+    // recipeOverrides is deliberately NOT included here — it's pushed per-recipe-id via
+    // pushRecipeOverridePatch() instead, so a stale device re-saving (e.g. just toggling a
+    // favorite) can never clobber someone else's more recent recipe edit/delete/restore.
     setDoc(SHARED_DOC, {
       favorites: Array.from(favorites),
-      weekPlan, checked: Array.from(checked), recipeOverrides, monthNames,
+      weekPlan, checked: Array.from(checked), monthNames,
       shopOverrides, customShopItems, customStats,
       updatedAt: Date.now(),
     }, { merge: true }).then(
@@ -959,13 +962,26 @@
     return ov ? { ...base, ...ov } : base;
   }
   function effectiveRecipes() { return RECIPES.map(r => getRecipe(r.id)).filter(r => !r.deleted); }
+  // Recipe overrides are pushed per-recipe-id (not as part of the big debounced whole-state blob):
+  // if two devices have the app open at once, a stale device re-saving its own full snapshot of
+  // recipeOverrides could otherwise silently clobber a fresher change (e.g. undo someone else's
+  // just-restored recipe) the moment its own unrelated save fires. Writing only the one changed id
+  // as a merge means an idle/stale device can never overwrite a key it didn't itself just touch.
+  function pushRecipeOverridePatch(id) {
+    saveLocal(LS_RECIPE_OVERRIDES, recipeOverrides);
+    if (!cloudReady) return;
+    setDoc(SHARED_DOC, { recipeOverrides: { [id]: recipeOverrides[id] ?? null } }, { merge: true }).then(
+      () => setSyncStatus("✅", "Zsynchronizowano z Martą/Damianem — dane na żywo między urządzeniami."),
+      () => setSyncStatus("⚠️", "Nie udało się zapisać w chmurze — sprawdź połączenie z internetem. Zmiany zostały zapisane lokalnie.")
+    );
+  }
   function saveRecipeOverride(id, patch) {
     recipeOverrides[id] = { ...(recipeOverrides[id] || {}), ...patch };
-    save(LS_RECIPE_OVERRIDES, recipeOverrides);
+    pushRecipeOverridePatch(id);
   }
   function clearRecipeOverride(id) {
     delete recipeOverrides[id];
-    save(LS_RECIPE_OVERRIDES, recipeOverrides);
+    pushRecipeOverridePatch(id);
   }
 
   // ---------- Trash: soft-deleted recipes, restorable for 30 days ----------
@@ -977,9 +993,8 @@
     if (recipeOverrides[id]) {
       delete recipeOverrides[id].deleted;
       delete recipeOverrides[id].deletedAt;
-      if (Object.keys(recipeOverrides[id]).length === 0) delete recipeOverrides[id];
     }
-    save(LS_RECIPE_OVERRIDES, recipeOverrides);
+    pushRecipeOverridePatch(id);
   }
   function trashList() {
     return Object.keys(recipeOverrides)
@@ -991,15 +1006,13 @@
   // Fully forget anything that's been sitting in the trash for 30+ days (run once on load).
   function purgeExpiredTrash() {
     const cutoff = Date.now() - TRASH_RETENTION_MS;
-    let changed = false;
     Object.keys(recipeOverrides).forEach(id => {
       const ov = recipeOverrides[id];
       if (ov && ov.deleted && (ov.deletedAt || 0) < cutoff) {
         delete recipeOverrides[id];
-        changed = true;
+        pushRecipeOverridePatch(Number(id));
       }
     });
-    if (changed) save(LS_RECIPE_OVERRIDES, recipeOverrides);
   }
   function daysLeftInTrash(deletedAt) {
     const msLeft = (deletedAt || 0) + TRASH_RETENTION_MS - Date.now();
