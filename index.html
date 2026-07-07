@@ -2292,7 +2292,20 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./sw.js").catch(() => {});
+      navigator.serviceWorker.register("./sw.js").then((reg) => {
+        // Ask right away whether a newer sw.js is available (don't wait for the browser's own,
+        // sometimes-lazy update check) — important for an installed PWA that gets reopened rather
+        // than freshly navigated to.
+        reg.update().catch(() => {});
+      }).catch(() => {});
+    });
+    // As soon as a new service worker takes over, reload once so the freshly deployed version
+    // shows up immediately instead of requiring the user to manually clear the cache.
+    let reloadedForUpdate = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (reloadedForUpdate) return;
+      reloadedForUpdate = true;
+      window.location.reload();
     });
   }
 </script>
