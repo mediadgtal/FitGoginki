@@ -124,9 +124,11 @@
     border-bottom: 1px solid var(--line);
     flex-wrap: wrap;
   }
-  header.top .brand { display: flex; flex-direction: column; gap: 2px; }
+  header.top .brand { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  header.top .brand-row { display: flex; align-items: center; gap: 10px; }
   header.top h1 { font-size: 26px; margin: 0; }
   header.top .sub { color: var(--ink-soft); font-size: 13.5px; }
+  .theme-toggle { flex: none; }
 
   nav.tabs {
     display: flex;
@@ -136,7 +138,12 @@
     border-radius: 999px;
     padding: 4px;
     box-shadow: var(--shadow);
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
   }
+  nav.tabs::-webkit-scrollbar { display: none; }
   nav.tabs button {
     border: none;
     background: transparent;
@@ -147,6 +154,8 @@
     font-weight: 600;
     letter-spacing: 0.01em;
     transition: background .15s ease, color .15s ease;
+    flex: none;
+    white-space: nowrap;
   }
   nav.tabs button[aria-selected="true"] {
     background: var(--accent);
@@ -386,10 +395,15 @@
 
   /* Toast */
   .toast {
-    display: inline-block;
+    display: flex; align-items: center; gap: 12px;
     background: var(--ink); color: var(--bg);
     padding: 10px 18px; border-radius: 999px; font-size: 13.5px; font-weight: 600;
     box-shadow: var(--shadow); margin-bottom: 14px;
+    width: fit-content; max-width: 100%;
+  }
+  .toast-action {
+    border: none; background: none; color: inherit;
+    text-decoration: underline; font-weight: 700; font-size: 13.5px; padding: 0; flex: none;
   }
 
   /* Small confirm / prompt modal */
@@ -482,6 +496,7 @@
     .week-grid { grid-template-columns: 70px repeat(7, minmax(110px, 1fr)); }
     header.top { gap: 10px; }
     header.top .brand { flex: 1 1 100%; }
+    nav.tabs { flex: 1 1 100%; min-width: 0; }
     .toolbar .search-wrap,
     .toolbar select,
     .toolbar .pill-btn,
@@ -560,7 +575,10 @@
 <div class="app-shell">
   <header class="top">
     <div class="brand">
-      <h1>FitGoginki</h1>
+      <div class="brand-row">
+        <h1>FitGoginki</h1>
+        <button class="icon-btn theme-toggle" id="themeToggle" aria-label="Przełącz jasny/ciemny motyw" title="Jasny / ciemny motyw">🌙</button>
+      </div>
       <div class="sub" id="headerSub">Wczytywanie…</div>
     </div>
     <nav class="tabs" role="tablist" aria-label="Widoki aplikacji">
@@ -569,7 +587,6 @@
       <button role="tab" aria-selected="false" data-tab="shopping">Lista zakupów</button>
       <button role="tab" aria-selected="false" data-tab="stats">Statystyki</button>
     </nav>
-    <button class="icon-btn theme-toggle" id="themeToggle" aria-label="Przełącz jasny/ciemny motyw" title="Jasny / ciemny motyw">🌙</button>
   </header>
 
   <div class="info-banner" id="infoBanner">
@@ -608,6 +625,7 @@
       </select>
       <button class="icon-btn" id="renameMonthBtn" title="Zmień nazwę wybranego miesiąca">✎</button>
       <button class="pill-btn" id="favToggle">♥ Tylko ulubione</button>
+      <button class="pill-btn" id="trashBtn">🗑 Kosz</button>
       <span class="count-tag" id="resultCount"></span>
     </div>
     <div class="grid" id="recipeGrid"></div>
@@ -792,6 +810,7 @@
     saveLocal(LS_SHOP_OVERRIDES, shopOverrides);
     saveLocal(LS_CUSTOM_ITEMS, customShopItems);
     saveLocal(LS_CUSTOM_STATS, customStats);
+    purgeExpiredTrash();
     rebuildDietOptions(dietSelect);
     renderGrid();
     if (!document.getElementById("tab-week").hidden) renderWeek();
@@ -903,6 +922,44 @@
     save(LS_RECIPE_OVERRIDES, recipeOverrides);
   }
 
+  // ---------- Trash: soft-deleted recipes, restorable for 30 days ----------
+  const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+  function moveRecipeToTrash(id) {
+    saveRecipeOverride(id, { deleted: true, deletedAt: Date.now() });
+  }
+  function restoreRecipeFromTrash(id) {
+    if (recipeOverrides[id]) {
+      delete recipeOverrides[id].deleted;
+      delete recipeOverrides[id].deletedAt;
+      if (Object.keys(recipeOverrides[id]).length === 0) delete recipeOverrides[id];
+    }
+    save(LS_RECIPE_OVERRIDES, recipeOverrides);
+  }
+  function trashList() {
+    return Object.keys(recipeOverrides)
+      .filter(id => recipeOverrides[id] && recipeOverrides[id].deleted)
+      .map(id => ({ id: Number(id), recipe: recipeById.get(Number(id)), deletedAt: recipeOverrides[id].deletedAt || 0 }))
+      .filter(x => x.recipe)
+      .sort((a, b) => b.deletedAt - a.deletedAt);
+  }
+  // Fully forget anything that's been sitting in the trash for 30+ days (run once on load).
+  function purgeExpiredTrash() {
+    const cutoff = Date.now() - TRASH_RETENTION_MS;
+    let changed = false;
+    Object.keys(recipeOverrides).forEach(id => {
+      const ov = recipeOverrides[id];
+      if (ov && ov.deleted && (ov.deletedAt || 0) < cutoff) {
+        delete recipeOverrides[id];
+        changed = true;
+      }
+    });
+    if (changed) save(LS_RECIPE_OVERRIDES, recipeOverrides);
+  }
+  function daysLeftInTrash(deletedAt) {
+    const msLeft = (deletedAt || 0) + TRASH_RETENTION_MS - Date.now();
+    return Math.max(0, Math.ceil(msLeft / (24 * 60 * 60 * 1000)));
+  }
+
   // ---------- Recipe photos: user's own photo replaces the FitPatka stock photo ----------
   function getPhotoUrl(r) {
     return (r && photoOverrides[r.id]) || (r && r.photo) || "";
@@ -944,20 +1001,29 @@
     return d ? d.name : "";
   }
 
-  // ---------- Toast (small transient notice) ----------
+  // ---------- Toast (small transient notice, optionally with an action button e.g. "Cofnij") ----------
   let toastTimer = null;
-  function showToast(msg) {
+  function showToast(msg, actionLabel, onAction) {
     const old = document.getElementById("appToast");
     if (old) old.remove();
     const t = document.createElement("div");
     t.id = "appToast";
     t.className = "toast";
-    t.textContent = msg;
+    const span = document.createElement("span");
+    span.textContent = msg;
+    t.appendChild(span);
+    if (actionLabel && onAction) {
+      const btn = document.createElement("button");
+      btn.className = "toast-action";
+      btn.textContent = actionLabel;
+      btn.addEventListener("click", () => { t.remove(); onAction(); });
+      t.appendChild(btn);
+    }
     const shell = document.querySelector(".app-shell");
     shell.insertBefore(t, shell.firstChild);
     t.scrollIntoView({ block: "nearest", behavior: "smooth" });
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.remove(), 3200);
+    toastTimer = setTimeout(() => t.remove(), actionLabel ? 6000 : 3200);
   }
 
   // ---------- Custom confirm/prompt modals ----------
@@ -1195,6 +1261,7 @@
   function renderGrid() {
     const list = currentList();
     resultCount.textContent = list.length + (list.length === 1 ? " przepis" : " przepisów");
+    updateTrashButton();
     grid.innerHTML = "";
     if (list.length === 0) {
       grid.innerHTML = '<div class="empty-state">Brak przepisów spełniających kryteria.</div>';
@@ -1257,6 +1324,51 @@
     renderGrid();
   });
   dietSelect.addEventListener("change", renderGrid);
+
+  // ---------- Trash modal (view + restore soft-deleted recipes) ----------
+  const trashBtn = document.getElementById("trashBtn");
+  function updateTrashButton() {
+    const n = trashList().length;
+    trashBtn.textContent = n > 0 ? `🗑 Kosz (${n})` : "🗑 Kosz";
+  }
+  function openTrashModal() {
+    const bd = document.createElement("div");
+    bd.className = "modal-backdrop";
+    const items = trashList();
+    bd.innerHTML = `
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-head">
+          <h2>Kosz</h2>
+          <button class="modal-close" aria-label="Zamknij">✕</button>
+        </div>
+        <p style="font-size:13px;color:var(--ink-soft);margin-top:0;">Usunięte przepisy czekają tu 30 dni, zanim znikną całkowicie.</p>
+        <div class="picker-list" id="trashList">
+          ${items.length === 0 ? '<div class="empty-state">Kosz jest pusty.</div>' : items.map(x => `
+            <div class="picker-row-item" style="cursor:default;" data-id="${x.id}">
+              <span class="prname">${escapeHtml(x.recipe.name)}</span>
+              <span class="prmacro">zostało ${daysLeftInTrash(x.deletedAt)} dni</span>
+              <button class="btn primary trash-restore-btn" data-id="${x.id}">Przywróć</button>
+            </div>
+          `).join("")}
+        </div>
+      </div>
+    `;
+    document.body.appendChild(bd);
+    const close = () => bd.remove();
+    bd.addEventListener("click", (e) => { if (e.target === bd) close(); });
+    bd.querySelector(".modal-close").addEventListener("click", close);
+    bd.querySelectorAll(".trash-restore-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const id = Number(btn.dataset.id);
+        const recipe = recipeById.get(id);
+        restoreRecipeFromTrash(id);
+        renderGrid();
+        close();
+        showToast(`Przywrócono „${recipe ? recipe.name : ""}”`);
+      });
+    });
+  }
+  trashBtn.addEventListener("click", openTrashModal);
 
   // ---------- Detail modal (view + edit) ----------
   let backdrop = null;
@@ -1337,11 +1449,15 @@
     });
     backdrop.querySelector("#modalEditBtn").addEventListener("click", () => renderDetailEdit(getRecipe(r.id)));
     backdrop.querySelector("#modalDeleteBtn").addEventListener("click", () => {
-      customConfirm(`Na pewno usunąć przepis „${r.name}”? Zniknie z listy przepisów (plany tygodnia, w których już go użyto, pozostaną bez zmian).`, () => {
-        saveRecipeOverride(r.id, { deleted: true });
+      customConfirm(`Na pewno usunąć przepis „${r.name}”? Trafi do kosza na 30 dni (plany tygodnia, w których już go użyto, pozostaną bez zmian) — w każdej chwili można go stamtąd przywrócić.`, () => {
+        moveRecipeToTrash(r.id);
         closeDetail();
         renderGrid();
-        showToast(`Usunięto „${r.name}”`);
+        showToast(`Usunięto „${r.name}”`, "Cofnij", () => {
+          restoreRecipeFromTrash(r.id);
+          renderGrid();
+          showToast(`Przywrócono „${r.name}”`);
+        });
       });
     });
     backdrop.querySelector("#categorySelect").addEventListener("change", (e) => {
@@ -2087,6 +2203,7 @@
     });
   });
 
+  purgeExpiredTrash();
   renderGrid();
 
   if ("serviceWorker" in navigator) {
