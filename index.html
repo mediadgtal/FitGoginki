@@ -2014,7 +2014,6 @@
       });
     });
     weekGrid.style.gridTemplateRows = `repeat(${activeMealRows().length + 1}, auto)`;
-    applyWeekZoom();
   }
 
   // ---------- "Przenieś" modal — accessible alternative to drag-and-drop ----------
@@ -2130,44 +2129,6 @@
       }
     });
   }
-
-  // ---------- Pinch-to-zoom the week grid (mobile "Excel-like" resize), remembered per device ----------
-  const LS_WEEK_ZOOM = "fp_week_zoom_v1";
-  let weekZoom = parseFloat(localStorage.getItem(LS_WEEK_ZOOM)) || 1;
-  function applyWeekZoom() {
-    weekGrid.style.setProperty("--week-zoom", weekZoom);
-  }
-  (function setupWeekPinchZoom() {
-    const pointers = new Map();
-    let startDist = 0, startZoom = 1;
-    weekGrid.addEventListener("pointerdown", (e) => {
-      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (pointers.size === 2) {
-        const pts = Array.from(pointers.values());
-        startDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
-        startZoom = weekZoom;
-      }
-    });
-    weekGrid.addEventListener("pointermove", (e) => {
-      if (!pointers.has(e.pointerId)) return;
-      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (pointers.size === 2 && startDist > 0) {
-        const pts = Array.from(pointers.values());
-        const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
-        weekZoom = Math.max(0.7, Math.min(1.6, startZoom * (dist / startDist)));
-        applyWeekZoom();
-      }
-    });
-    function endPointer(e) {
-      pointers.delete(e.pointerId);
-      if (pointers.size < 2) {
-        startDist = 0;
-        localStorage.setItem(LS_WEEK_ZOOM, String(weekZoom));
-      }
-    }
-    weekGrid.addEventListener("pointerup", endPointer);
-    weekGrid.addEventListener("pointercancel", endPointer);
-  })();
 
   document.getElementById("prevWeekBtn").addEventListener("click", () => { viewedMonday = addDays(viewedMonday, -7); renderWeek(); });
   document.getElementById("nextWeekBtn").addEventListener("click", () => { viewedMonday = addDays(viewedMonday, 7); renderWeek(); });
