@@ -514,14 +514,23 @@
   .shop-item .qty { font-size: 13px; color: var(--ink-soft); white-space: nowrap; }
   .shop-category-group { margin-bottom: 18px; }
   .shop-category-heading {
+    display: flex; align-items: center; gap: 8px;
+    width: 100%;
     font-family: ui-serif, Georgia, serif;
     font-size: 15px;
     font-weight: 700;
     color: var(--ink-soft);
     margin: 0 0 8px;
-    padding-bottom: 4px;
+    padding: 4px 0;
+    border: none;
     border-bottom: 1px solid var(--line);
+    background: none;
+    cursor: pointer;
+    text-align: left;
   }
+  .shop-category-heading .chevron { transition: transform .15s ease; flex: none; font-size: 11px; }
+  .shop-category-heading.collapsed .chevron { transform: rotate(-90deg); }
+  .shop-category-heading .cat-count { font-weight: 400; font-size: 12.5px; color: var(--ink-soft); margin-left: auto; }
   .shop-counter { color: var(--ink-soft); font-size: 13.5px; white-space: nowrap; }
   .shop-item .cat-select { font-size: 12px; padding: 3px 4px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg-raised); color: inherit; }
   .empty-state {
@@ -899,6 +908,10 @@
   // Keyed by the product's originalName only (not per-week) — a category correction should stick
   // to the product everywhere it's used, unlike qty/name overrides which are per-week.
   let shopCategoryOverrides = load(LS_SHOP_CATEGORY_OVERRIDES, {});
+  const LS_SHOP_COLLAPSED_CATEGORIES = "fp_shop_collapsed_categories_v1";
+  // Which-sections-are-collapsed is a per-device view preference, not shared data — deliberately
+  // NOT synced to Firestore, so Damian and Marta can each collapse different categories.
+  let collapsedShopCategories = new Set(load(LS_SHOP_COLLAPSED_CATEGORIES, []));
   let customShopItems = load(LS_CUSTOM_ITEMS, {}); // { "YYYY-MM-DD-of-monday": [{id,name,qty,checked}] }
   let customStats = load(LS_CUSTOM_STATS, {}); // { "periodKey": [{label, value}] }
   const LS_PHOTOS = "fp_photo_overrides_v1";
@@ -2419,13 +2432,22 @@
     SHOP_CATEGORIES.forEach(category => {
       const items = byCategory.get(category);
       if (!items || !items.length) return;
+      const isCollapsed = collapsedShopCategories.has(category);
       const group = document.createElement("div");
       group.className = "shop-category-group";
-      const heading = document.createElement("h3");
-      heading.className = "shop-category-heading";
-      heading.textContent = category;
+      const heading = document.createElement("button");
+      heading.type = "button";
+      heading.className = "shop-category-heading" + (isCollapsed ? " collapsed" : "");
+      heading.setAttribute("aria-expanded", String(!isCollapsed));
+      heading.innerHTML = `<span class="chevron">▾</span>${escapeHtml(category)}<span class="cat-count">${items.length}</span>`;
+      heading.addEventListener("click", () => {
+        if (collapsedShopCategories.has(category)) collapsedShopCategories.delete(category);
+        else collapsedShopCategories.add(category);
+        saveLocal(LS_SHOP_COLLAPSED_CATEGORIES, Array.from(collapsedShopCategories));
+        renderShopping();
+      });
       group.appendChild(heading);
-      items.forEach(item => group.appendChild(buildShopRow(item)));
+      if (!isCollapsed) items.forEach(item => group.appendChild(buildShopRow(item)));
       shopList.appendChild(group);
     });
   }
