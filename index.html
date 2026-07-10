@@ -512,6 +512,18 @@
   .shop-item input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--accent); }
   .shop-item .name { flex: 1; font-size: 14px; display: flex; align-items: center; min-width: 0; }
   .shop-item .qty { font-size: 13px; color: var(--ink-soft); white-space: nowrap; }
+  .shop-category-group { margin-bottom: 18px; }
+  .shop-category-heading {
+    font-family: ui-serif, Georgia, serif;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--ink-soft);
+    margin: 0 0 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--line);
+  }
+  .shop-counter { color: var(--ink-soft); font-size: 13.5px; white-space: nowrap; }
+  .shop-item .cat-select { font-size: 12px; padding: 3px 4px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg-raised); color: inherit; }
   .empty-state {
     color: var(--ink-soft);
     border: 1px dashed var(--line);
@@ -701,10 +713,9 @@
         <span class="shop-week-range range-label" id="shopWeekRangeLabel"></span>
         <button class="btn" id="shopNextWeekBtn">▶</button>
       </div>
+      <span class="shop-counter" id="shopCounter"></span>
       <span style="flex:1"></span>
       <button class="btn" id="copyListBtn">Kopiuj listę</button>
-      <button class="btn" id="printListBtn">Drukuj</button>
-      <button class="btn" id="pdfWeekBtn">Zapisz tydzień jako PDF</button>
       <button class="btn danger" id="resetCheckedBtn">Odznacz wszystko</button>
     </div>
     <div class="add-item-row">
@@ -809,11 +820,48 @@
   const CATEGORY_LABELS = { "Śniadanie": "Na słodko", "Kolacja": "Wytrawne" };
   const categoryLabel = (c) => CATEGORY_LABELS[c] || c;
   const PEOPLE = ["Damian", "Marta"];
-  const DAY_LABELS = ["Pon","Wt","Śr","Czw","Pt","Sob","Nd"];
+  // Indexed by Date#getDay() (0=Sun..6=Sat), not by position in a displayed week — the week
+  // can start on any day (see weekStartOf), so a positional array would mislabel columns.
+  const DAY_LABELS = ["Nd","Pon","Wt","Śr","Czw","Pt","Sob"];
   const DAY_NAMES_FULL = ["Niedziela","Poniedziałek","Wtorek","Środa","Czwartek","Piątek","Sobota"];
   const MONTHS_SHORT = ["sty","lut","mar","kwi","maj","cze","lip","sie","wrz","paź","lis","gru"];
   const MONTHS_FULL = ["Styczeń","Luty","Marzec","Kwiecień","Maj","Czerwiec","Lipiec","Sierpień","Wrzesień","Październik","Listopad","Grudzień"];
   const MONTHS_GENITIVE = ["stycznia","lutego","marca","kwietnia","maja","czerwca","lipca","sierpnia","września","października","listopada","grudnia"];
+
+  // ---------- Shopping-list categories ----------
+  // Fixed display order requested by Damian/Marta. "Inne" is not one of their named
+  // categories — it only catches whatever the keyword heuristic below can't place, and
+  // custom (non-recipe) items until a category is manually chosen for them.
+  const SHOP_CATEGORIES = ["Warzywa","Zioła świeże","Owoce","Pieczywo","Słoiki i konserwy","Przyprawy","Słodycze","Nabiał","Mięso","Napoje","Orzechy i nasiona","Produkty zbożowe i strączki","Chemia","Mrożonki","Przekąski","Inne"];
+  // Keyword heuristic derived from and verified against the actual 516 unique ingredient
+  // names in this dataset (see scratch classify3.py from the session that built this) —
+  // checked in this order, first match wins. Not perfect for every edge case (e.g. a name
+  // never seen in the source data); shopCategoryOverrides lets a product be corrected once,
+  // permanently, from the shopping-list edit UI.
+  const CATEGORY_RULES = [
+    ["Mrożonki", /mrożon|kostki lodu/],
+    ["Chemia", /papier toaletowy|płyn do|proszek do prania|mydł|szampon|pasta do zębów|ręcznik papierowy|worki na śmieci|gąbka|płyn do naczyń|żwirek/],
+    ["Produkty zbożowe i strączki", /ciecierzyc|fasol|soczewic|\bbób\b|edamame|kasza|ryż|makaron|mąk|płatki|otręby|kuskus|komosa|orkisz ekspandowany|bulgur|gnocchi|kopytka|pierogi|tortellini|granola|tagiatelle|udon|skrobia/],
+    ["Przyprawy", /przyprawa|suszon|pieprz|\bsól\b|cynamon mielon|kurkuma mielon|gałka muszkatołowa|kardamon mielon|imbir mielony|czosnek w proszku|liść laurowy|ziele angielskie|zioła prowansalskie|sos sojowy|sos rybny|hoisin|sriracha|gochujang|miso|tom ka|tom yum|musztarda|majonez|ketchup|chrzan|pasta curry|\boct|oliwa |bulion|wywar|pesto|nasiona kolendry|papryka wędzona|kumin w proszku|chili w proszku|olej chilli|olej kokosowy|olej rzepakowy|olej z wiesiołka/],
+    ["Orzechy i nasiona", /orzech|migdał|pistacj|nasiona chia|nasiona słonecznika|nasiona słodkiej bazylii|pestki dyni|sezam|olej sezamowy|siemię lniane|wiórki kokosowe|tahini|masło orzechowe|masło migdałowe|babka płesznik|\bmak\b/],
+    ["Zioła świeże", /bazylia|kolendra|\bkoper\b|mięta|natka|rozmaryn|szczypiorek|tymianek/],
+    ["Słodycze", /czekolad|cukier|\bmiód|ciasteczk|ciastk|biszkopt|herbatnik|budyń|galaretk|erytrytol|syrop klonowy|krem pistacjowy|krem do smarowania|duo pasta czekoladowa|proszek do pieczenia|soda oczyszczona|żelatyna|aromat waniliowy|ekstrakt waniliowy|cukier wanilinowy|kajmak|kakao/],
+    ["Nabiał", /mlek|jogurt|kefir|maślank|\bser\b|serek|śmietan|twaróg|twarożek|skyr|\bmasło\b|jajk|jajo|białko jaja|żółtko jaja|camembert|cheddar|mozzarella|\bfeta\b|gorgonzola|gouda|halloumi|mascarpone|parmezan|ricotta|białko serwatkowe|miks tłuszczowy|pudding/],
+    ["Mięso", /kurczak|indyk|wołowin|boczek|kiełbas|szynka|prosciutto|parówk|dorsz|łosoś|pstrąg|tuńczyk|makrela|krewetk|polędwic|mięso|tofu/],
+    ["Napoje", /\bwoda\b|woda gazowana|woda kokosowa|kawa|herbata|\bsok\b|sok z|wino |napój|napoj|espresso|matcha/],
+    ["Pieczywo", /chleb|bułk|bagietk|bajgiel|chlebek pita|pita pszenna|tortilla|grahamka|ciasto francuskie|drożdż|pinsa/],
+    ["Owoce", /banan|jabłk|gruszk|cytryn|limonk|pomarańcz|mandarynk|kiwi|ananas|arbuz|brzoskwini|nektarynk|morel|śliwk|czereśni|jagod|borówk|truskawk|malin|jeżyn|winogron|granat|kaki|figa|rabarbar|żurawin|daktyl|awokado|skórka z|mango/],
+    ["Przekąski", /groszek ptysiowy|batonik/],
+    ["Słoiki i konserwy", /kapary|oliwki|ogórk|kukurydza konserwowa|passata|przecier|koncentrat|dżem|powidł|pomidor|hummus|buraki ugotowane|ziemniaki ugotowane|algi nori/],
+  ];
+  function guessCategory(name) {
+    const n = name.toLowerCase();
+    for (const [cat, re] of CATEGORY_RULES) if (re.test(n)) return cat;
+    return "Warzywa";
+  }
+  function categoryOf(originalName) {
+    return shopCategoryOverrides[originalName] || guessCategory(originalName);
+  }
   // weekPlan: { "YYYY-MM-DD": { "Śniadanie|Damian": [{uid,id,portions,override?}, ...], "Obiad|Marta": [...], ... } }
   // Each day/meal/person slot holds an ARRAY of entries (not a single recipe) so several meals can be
   // stacked on one day (e.g. 7 dinners added to Monday) and later moved onto other days one at a time.
@@ -847,6 +895,10 @@
   let shopOverrides = load(LS_SHOP_OVERRIDES, {});
   const LS_SHOP_NAME_OVERRIDES = "fp_shop_name_overrides_v1";
   let shopNameOverrides = load(LS_SHOP_NAME_OVERRIDES, {}); // { shopKey(originalName): displayName } — per-week, doesn't touch the recipe's ingredient data
+  const LS_SHOP_CATEGORY_OVERRIDES = "fp_shop_category_overrides_v1";
+  // Keyed by the product's originalName only (not per-week) — a category correction should stick
+  // to the product everywhere it's used, unlike qty/name overrides which are per-week.
+  let shopCategoryOverrides = load(LS_SHOP_CATEGORY_OVERRIDES, {});
   let customShopItems = load(LS_CUSTOM_ITEMS, {}); // { "YYYY-MM-DD-of-monday": [{id,name,qty,checked}] }
   let customStats = load(LS_CUSTOM_STATS, {}); // { "periodKey": [{label, value}] }
   const LS_PHOTOS = "fp_photo_overrides_v1";
@@ -869,7 +921,7 @@
     setDoc(SHARED_DOC, {
       favorites: Array.from(favorites),
       checked: Array.from(checked), monthNames,
-      shopOverrides, shopNameOverrides, customShopItems, customStats,
+      shopOverrides, shopNameOverrides, shopCategoryOverrides, customShopItems, customStats,
       updatedAt: Date.now(),
     }, { merge: true }).then(
       () => setSyncStatus("✅", "Zsynchronizowano z Martą/Damianem — dane na żywo między urządzeniami."),
@@ -948,6 +1000,7 @@
     monthNames = data.monthNames || {};
     shopOverrides = data.shopOverrides || {};
     shopNameOverrides = data.shopNameOverrides || {};
+    shopCategoryOverrides = data.shopCategoryOverrides || {};
     customShopItems = data.customShopItems || {};
     customStats = data.customStats || {};
     saveLocal(LS_FAV, Array.from(favorites));
@@ -957,6 +1010,7 @@
     saveLocal(LS_MONTH_NAMES, monthNames);
     saveLocal(LS_SHOP_OVERRIDES, shopOverrides);
     saveLocal(LS_SHOP_NAME_OVERRIDES, shopNameOverrides);
+    saveLocal(LS_SHOP_CATEGORY_OVERRIDES, shopCategoryOverrides);
     saveLocal(LS_CUSTOM_ITEMS, customShopItems);
     saveLocal(LS_CUSTOM_STATS, customStats);
     purgeExpiredTrash();
@@ -1024,25 +1078,25 @@
   function pad2(n) { return String(n).padStart(2, "0"); }
   function isoDate(d) { return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`; }
   function addDays(d, n) { const r = new Date(d); r.setDate(r.getDate() + n); return r; }
-  function mondayOf(d) {
+  function weekStartOf(d) {
     const r = new Date(d);
     r.setHours(0,0,0,0);
     const dow = r.getDay(); // 0=Sun..6=Sat
-    const diff = dow === 0 ? -6 : 1 - dow;
+    const diff = dow === 6 ? 0 : -(dow + 1);
     return addDays(r, diff);
   }
   function sameDate(a, b) { return isoDate(a) === isoDate(b); }
   function formatDayNum(d) { return `${d.getDate()}.${pad2(d.getMonth()+1)}`; }
-  function formatRangeLabel(monday) {
-    const sunday = addDays(monday, 6);
-    const y = monday.getFullYear();
-    if (monday.getMonth() === sunday.getMonth()) {
-      return `${monday.getDate()}–${sunday.getDate()} ${MONTHS_SHORT[monday.getMonth()]} ${y}`;
+  function formatRangeLabel(weekStart) {
+    const weekEnd = addDays(weekStart, 6);
+    const y = weekStart.getFullYear();
+    if (weekStart.getMonth() === weekEnd.getMonth()) {
+      return `${weekStart.getDate()}–${weekEnd.getDate()} ${MONTHS_SHORT[weekStart.getMonth()]} ${y}`;
     }
-    return `${monday.getDate()} ${MONTHS_SHORT[monday.getMonth()]} – ${sunday.getDate()} ${MONTHS_SHORT[sunday.getMonth()]} ${y}`;
+    return `${weekStart.getDate()} ${MONTHS_SHORT[weekStart.getMonth()]} – ${weekEnd.getDate()} ${MONTHS_SHORT[weekEnd.getMonth()]} ${y}`;
   }
 
-  let viewedMonday = mondayOf(new Date());
+  let viewedWeekStart = weekStartOf(new Date());
 
   // ---------- Meal-type map (derived from the original diet plans + shared-collection category) ----------
   const mealTypesOf = new Map(); // recipeId -> Set(meal/category names)
@@ -1623,8 +1677,8 @@
 
   function renderDetailView(r, weekCtx) {
     const dayOptions = [...Array(7)].map((_, i) => {
-      const d = addDays(viewedMonday, i);
-      return `<option value="${isoDate(d)}">${DAY_LABELS[i]} ${formatDayNum(d)}</option>`;
+      const d = addDays(viewedWeekStart, i);
+      return `<option value="${isoDate(d)}">${DAY_LABELS[d.getDay()]} ${formatDayNum(d)}</option>`;
     }).join("");
     const mealOptions = MEALS.map(m => `<option value="${m}">${m}</option>`).join("");
     const photoUrl = getPhotoUrl(r);
@@ -1667,7 +1721,7 @@
           ${weekCtx ? "" : '<button class="btn danger" id="modalDeleteBtn">🗑 Usuń przepis</button>'}
         </div>
         ${weekCtx ? "" : `
-        <h3>Dodaj do tygodnia (${formatRangeLabel(viewedMonday)})</h3>
+        <h3>Dodaj do tygodnia (${formatRangeLabel(viewedWeekStart)})</h3>
         <div class="picker-row">
           <select id="pickDay">${dayOptions}</select>
           <select id="pickMeal">${mealOptions}</select>
@@ -1931,7 +1985,7 @@
     pushWeekPatch(fromDate === toDate ? [fromDate] : [fromDate, toDate]);
     renderWeek();
   }
-  function weekDates() { return [...Array(7)].map((_, i) => addDays(viewedMonday, i)); }
+  function weekDates() { return [...Array(7)].map((_, i) => addDays(viewedWeekStart, i)); }
   function activeMealRows() {
     const people = weekPersonView === "Razem" ? PEOPLE : [weekPersonView];
     const rows = [];
@@ -1948,15 +2002,15 @@
   });
 
   function renderWeek() {
-    weekRangeLabel.textContent = formatRangeLabel(viewedMonday);
-    jumpDate.value = isoDate(viewedMonday);
+    weekRangeLabel.textContent = formatRangeLabel(viewedWeekStart);
+    jumpDate.value = isoDate(viewedWeekStart);
     const today = new Date();
     weekGrid.innerHTML = "";
     weekGrid.appendChild(document.createElement("div"));
     weekDates().forEach((d, i) => {
       const h = document.createElement("div");
       h.className = "head-cell" + (sameDate(d, today) ? " is-today" : "");
-      h.innerHTML = `${DAY_LABELS[i]}<span class="date-num">${formatDayNum(d)}</span>`;
+      h.innerHTML = `${DAY_LABELS[d.getDay()]}<span class="date-num">${formatDayNum(d)}</span>`;
       weekGrid.appendChild(h);
     });
     activeMealRows().forEach(({ meal, person }) => {
@@ -2130,16 +2184,16 @@
     });
   }
 
-  document.getElementById("prevWeekBtn").addEventListener("click", () => { viewedMonday = addDays(viewedMonday, -7); renderWeek(); });
-  document.getElementById("nextWeekBtn").addEventListener("click", () => { viewedMonday = addDays(viewedMonday, 7); renderWeek(); });
-  document.getElementById("todayWeekBtn").addEventListener("click", () => { viewedMonday = mondayOf(new Date()); renderWeek(); });
+  document.getElementById("prevWeekBtn").addEventListener("click", () => { viewedWeekStart = addDays(viewedWeekStart, -7); renderWeek(); });
+  document.getElementById("nextWeekBtn").addEventListener("click", () => { viewedWeekStart = addDays(viewedWeekStart, 7); renderWeek(); });
+  document.getElementById("todayWeekBtn").addEventListener("click", () => { viewedWeekStart = weekStartOf(new Date()); renderWeek(); });
   jumpDate.addEventListener("change", () => {
     if (!jumpDate.value) return;
-    viewedMonday = mondayOf(new Date(jumpDate.value + "T00:00:00"));
+    viewedWeekStart = weekStartOf(new Date(jumpDate.value + "T00:00:00"));
     renderWeek();
   });
   document.getElementById("clearWeekBtn").addEventListener("click", () => {
-    customConfirm(`Wyczyścić plan na tydzień ${formatRangeLabel(viewedMonday)}?`, () => {
+    customConfirm(`Wyczyścić plan na tydzień ${formatRangeLabel(viewedWeekStart)}?`, () => {
       const dates = weekDates().map(d => isoDate(d));
       dates.forEach(dISO => delete weekPlan[dISO]);
       pushWeekPatch(dates);
@@ -2288,10 +2342,11 @@
   // ---------- Shopping list (for the currently viewed week) ----------
   const shopList = document.getElementById("shopList");
   const shopWeekRangeLabel = document.getElementById("shopWeekRangeLabel");
+  const shopCounter = document.getElementById("shopCounter");
 
-  function shopKey(name) { return `${isoDate(viewedMonday)}|${name}`; }
-  function customKey(id) { return `${isoDate(viewedMonday)}|custom|${id}`; }
-  function customItemsForWeek() { return customShopItems[isoDate(viewedMonday)] || []; }
+  function shopKey(name) { return `${isoDate(viewedWeekStart)}|${name}`; }
+  function customKey(id) { return `${isoDate(viewedWeekStart)}|custom|${id}`; }
+  function customItemsForWeek() { return customShopItems[isoDate(viewedWeekStart)] || []; }
 
   function aggregateIngredients() {
     const totals = new Map();
@@ -2323,15 +2378,16 @@
     return list;
   }
 
-  // Combined, sorted (unchecked first, then checked at the bottom) list of
-  // recipe-derived ingredients and manually added custom items for the week.
+  // Combined, category-grouped, sorted (unchecked first, then checked at the bottom within
+  // each category) list of recipe-derived ingredients and manually added custom items for the week.
   function shoppingRows() {
     const rows = aggregateIngredients().map(item => ({
       type: "ingredient", name: item.name, originalName: item.originalName, qtyLabel: `${Math.round(item.grams)} g`,
       overridden: item.overridden, nameOverridden: item.nameOverridden, key: shopKey(item.originalName), raw: item,
+      category: categoryOf(item.originalName), categoryOverridden: !!shopCategoryOverrides[item.originalName],
     }));
     customItemsForWeek().forEach(ci => {
-      rows.push({ type: "custom", name: ci.name, qtyLabel: ci.qty || "", key: customKey(ci.id), id: ci.id });
+      rows.push({ type: "custom", name: ci.name, qtyLabel: ci.qty || "", key: customKey(ci.id), id: ci.id, category: ci.category || "Inne" });
     });
     rows.sort((a, b) => {
       const ca = checked.has(a.key) ? 1 : 0, cb = checked.has(b.key) ? 1 : 0;
@@ -2341,94 +2397,124 @@
     return rows;
   }
 
+  function categorySelectHtml(current) {
+    return `<select class="cat-select">${SHOP_CATEGORIES.map(c => `<option value="${c}" ${c === current ? "selected" : ""}>${c}</option>`).join("")}</select>`;
+  }
+
   function renderShopping() {
-    shopWeekRangeLabel.textContent = formatRangeLabel(viewedMonday);
+    shopWeekRangeLabel.textContent = formatRangeLabel(viewedWeekStart);
     const rows = shoppingRows();
+    const remaining = rows.filter(r => !checked.has(r.key)).length;
+    shopCounter.textContent = rows.length ? `${remaining} z ${rows.length} do kupienia` : "";
     shopList.innerHTML = "";
     if (!rows.length) {
       shopList.innerHTML = '<div class="empty-state">Dodaj przepisy do planu na ten tydzień (w zakładce „Mój tydzień”) albo dopisz własny produkt poniżej.</div>';
       return;
     }
+    const byCategory = new Map();
     rows.forEach(item => {
-      const row = document.createElement("div");
-      const isChecked = checked.has(item.key);
-      row.className = "shop-item" + (isChecked ? " checked" : "") + (item.type === "custom" ? " custom" : "");
-      row.innerHTML = `
-        <input type="checkbox" ${isChecked ? "checked" : ""} />
-        <span class="name">${escapeHtml(item.name)}${item.nameOverridden ? '<button class="reset-name-btn" type="button" aria-label="Przywróć oryginalną nazwę">↺</button>' : ""}</span>
-        <span class="qty tabular ${item.overridden ? "overridden" : ""}">${escapeHtml(item.qtyLabel)}</span>
-        <button class="edit-btn" type="button" aria-label="Edytuj produkt">✎</button>
-        ${item.type === "ingredient" && item.overridden ? '<button class="reset-btn" type="button" aria-label="Przywróć wyliczoną ilość">↺</button>' : ""}
-        ${item.type === "custom" ? '<button class="del-btn" type="button" aria-label="Usuń produkt">✕</button>' : ""}
-      `;
-      row.querySelector('input[type="checkbox"]').addEventListener("change", (e) => {
-        if (e.target.checked) checked.add(item.key); else checked.delete(item.key);
-        save(LS_CHECKED, Array.from(checked));
-        renderShopping();
-      });
-      row.querySelector(".edit-btn").addEventListener("click", () => {
-        const nameSpan = row.querySelector(".name");
-        const qtySpan = row.querySelector(".qty");
-        nameSpan.outerHTML = `<span class="name-edit"><input type="text" value="${escapeHtml(item.name)}" /></span>`;
-        qtySpan.outerHTML = `<span class="qty-edit"><input type="text" value="${escapeHtml(item.qtyLabel)}" /></span>`;
-        const nameInput = row.querySelector(".name-edit input");
-        const qtyInput = row.querySelector(".qty-edit input");
-        nameInput.focus(); nameInput.select();
-        function commit() {
-          const newName = nameInput.value.trim();
-          if (item.type === "ingredient") {
-            if (newName && newName !== item.originalName) { shopNameOverrides[shopKey(item.originalName)] = newName; }
-            else { delete shopNameOverrides[shopKey(item.originalName)]; }
-            save(LS_SHOP_NAME_OVERRIDES, shopNameOverrides);
-            const v = parseFloat(qtyInput.value);
-            if (!isNaN(v)) { shopOverrides[shopKey(item.originalName)] = v; save(LS_SHOP_OVERRIDES, shopOverrides); }
-          } else {
-            const weekKey = isoDate(viewedMonday);
-            const list = customShopItems[weekKey] || [];
-            const ci = list.find(x => x.id === item.id);
-            if (ci) { if (newName) ci.name = newName; ci.qty = qtyInput.value; save(LS_CUSTOM_ITEMS, customShopItems); }
-          }
-          renderShopping();
-        }
-        [nameInput, qtyInput].forEach(inp => {
-          inp.addEventListener("blur", () => setTimeout(() => { if (!row.contains(document.activeElement)) commit(); }, 0));
-          inp.addEventListener("keydown", (e) => { if (e.key === "Enter") commit(); });
-        });
-      });
-      const resetBtn = row.querySelector(".reset-btn");
-      if (resetBtn) resetBtn.addEventListener("click", () => {
-        delete shopOverrides[shopKey(item.originalName)];
-        save(LS_SHOP_OVERRIDES, shopOverrides);
-        renderShopping();
-      });
-      const resetNameBtn = row.querySelector(".reset-name-btn");
-      if (resetNameBtn) resetNameBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        delete shopNameOverrides[shopKey(item.originalName)];
-        save(LS_SHOP_NAME_OVERRIDES, shopNameOverrides);
-        renderShopping();
-      });
-      const delBtn = row.querySelector(".del-btn");
-      if (delBtn) delBtn.addEventListener("click", () => {
-        const weekKey = isoDate(viewedMonday);
-        customShopItems[weekKey] = (customShopItems[weekKey] || []).filter(x => x.id !== item.id);
-        save(LS_CUSTOM_ITEMS, customShopItems);
-        renderShopping();
-      });
-      shopList.appendChild(row);
+      if (!byCategory.has(item.category)) byCategory.set(item.category, []);
+      byCategory.get(item.category).push(item);
+    });
+    SHOP_CATEGORIES.forEach(category => {
+      const items = byCategory.get(category);
+      if (!items || !items.length) return;
+      const group = document.createElement("div");
+      group.className = "shop-category-group";
+      const heading = document.createElement("h3");
+      heading.className = "shop-category-heading";
+      heading.textContent = category;
+      group.appendChild(heading);
+      items.forEach(item => group.appendChild(buildShopRow(item)));
+      shopList.appendChild(group);
     });
   }
-  document.getElementById("shopPrevWeekBtn").addEventListener("click", () => { viewedMonday = addDays(viewedMonday, -7); renderShopping(); });
-  document.getElementById("shopNextWeekBtn").addEventListener("click", () => { viewedMonday = addDays(viewedMonday, 7); renderShopping(); });
+
+  function buildShopRow(item) {
+    const row = document.createElement("div");
+    const isChecked = checked.has(item.key);
+    row.className = "shop-item" + (isChecked ? " checked" : "") + (item.type === "custom" ? " custom" : "");
+    row.innerHTML = `
+      <input type="checkbox" ${isChecked ? "checked" : ""} />
+      <span class="name">${escapeHtml(item.name)}${item.nameOverridden ? '<button class="reset-name-btn" type="button" aria-label="Przywróć oryginalną nazwę">↺</button>' : ""}</span>
+      <span class="qty tabular ${item.overridden ? "overridden" : ""}">${escapeHtml(item.qtyLabel)}</span>
+      <button class="edit-btn" type="button" aria-label="Edytuj produkt">✎</button>
+      ${item.type === "ingredient" && item.overridden ? '<button class="reset-btn" type="button" aria-label="Przywróć wyliczoną ilość">↺</button>' : ""}
+      ${item.type === "custom" ? '<button class="del-btn" type="button" aria-label="Usuń produkt">✕</button>' : ""}
+    `;
+    row.querySelector('input[type="checkbox"]').addEventListener("change", (e) => {
+      if (e.target.checked) checked.add(item.key); else checked.delete(item.key);
+      save(LS_CHECKED, Array.from(checked));
+      renderShopping();
+    });
+    row.querySelector(".edit-btn").addEventListener("click", () => {
+      const nameSpan = row.querySelector(".name");
+      const qtySpan = row.querySelector(".qty");
+      nameSpan.outerHTML = `<span class="name-edit"><input type="text" value="${escapeHtml(item.name)}" /></span>`;
+      qtySpan.outerHTML = `<span class="qty-edit"><input type="text" value="${escapeHtml(item.qtyLabel)}" /></span>${categorySelectHtml(item.category)}`;
+      const nameInput = row.querySelector(".name-edit input");
+      const qtyInput = row.querySelector(".qty-edit input");
+      const catSelect = row.querySelector(".cat-select");
+      nameInput.focus(); nameInput.select();
+      function commit() {
+        const newName = nameInput.value.trim();
+        const newCategory = catSelect.value;
+        if (item.type === "ingredient") {
+          if (newName && newName !== item.originalName) { shopNameOverrides[shopKey(item.originalName)] = newName; }
+          else { delete shopNameOverrides[shopKey(item.originalName)]; }
+          save(LS_SHOP_NAME_OVERRIDES, shopNameOverrides);
+          const v = parseFloat(qtyInput.value);
+          if (!isNaN(v)) { shopOverrides[shopKey(item.originalName)] = v; save(LS_SHOP_OVERRIDES, shopOverrides); }
+          if (newCategory !== guessCategory(item.originalName)) { shopCategoryOverrides[item.originalName] = newCategory; }
+          else { delete shopCategoryOverrides[item.originalName]; }
+          save(LS_SHOP_CATEGORY_OVERRIDES, shopCategoryOverrides);
+        } else {
+          const weekKey = isoDate(viewedWeekStart);
+          const list = customShopItems[weekKey] || [];
+          const ci = list.find(x => x.id === item.id);
+          if (ci) { if (newName) ci.name = newName; ci.qty = qtyInput.value; ci.category = newCategory; save(LS_CUSTOM_ITEMS, customShopItems); }
+        }
+        renderShopping();
+      }
+      [nameInput, qtyInput].forEach(inp => {
+        inp.addEventListener("blur", () => setTimeout(() => { if (!row.contains(document.activeElement)) commit(); }, 0));
+        inp.addEventListener("keydown", (e) => { if (e.key === "Enter") commit(); });
+      });
+      catSelect.addEventListener("change", commit);
+    });
+    const resetBtn = row.querySelector(".reset-btn");
+    if (resetBtn) resetBtn.addEventListener("click", () => {
+      delete shopOverrides[shopKey(item.originalName)];
+      save(LS_SHOP_OVERRIDES, shopOverrides);
+      renderShopping();
+    });
+    const resetNameBtn = row.querySelector(".reset-name-btn");
+    if (resetNameBtn) resetNameBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      delete shopNameOverrides[shopKey(item.originalName)];
+      save(LS_SHOP_NAME_OVERRIDES, shopNameOverrides);
+      renderShopping();
+    });
+    const delBtn = row.querySelector(".del-btn");
+    if (delBtn) delBtn.addEventListener("click", () => {
+      const weekKey = isoDate(viewedWeekStart);
+      customShopItems[weekKey] = (customShopItems[weekKey] || []).filter(x => x.id !== item.id);
+      save(LS_CUSTOM_ITEMS, customShopItems);
+      renderShopping();
+    });
+    return row;
+  }
+  document.getElementById("shopPrevWeekBtn").addEventListener("click", () => { viewedWeekStart = addDays(viewedWeekStart, -7); renderShopping(); });
+  document.getElementById("shopNextWeekBtn").addEventListener("click", () => { viewedWeekStart = addDays(viewedWeekStart, 7); renderShopping(); });
 
   const addItemInput = document.getElementById("addItemInput");
   const addItemQty = document.getElementById("addItemQty");
   function addCustomShopItem() {
     const name = addItemInput.value.trim();
     if (!name) return;
-    const weekKey = isoDate(viewedMonday);
+    const weekKey = isoDate(viewedWeekStart);
     customShopItems[weekKey] = customShopItems[weekKey] || [];
-    customShopItems[weekKey].push({ id: Date.now() + Math.random(), name, qty: addItemQty.value.trim() });
+    customShopItems[weekKey].push({ id: Date.now() + Math.random(), name, qty: addItemQty.value.trim(), category: "Inne" });
     save(LS_CUSTOM_ITEMS, customShopItems);
     addItemInput.value = ""; addItemQty.value = "";
     addItemInput.focus();
@@ -2439,65 +2525,10 @@
   addItemQty.addEventListener("keydown", (e) => { if (e.key === "Enter") addCustomShopItem(); });
 
   document.getElementById("copyListBtn").addEventListener("click", () => {
-    const text = `Lista zakupów (${formatRangeLabel(viewedMonday)}):\n` + shoppingRows().map(i => `- ${i.name}${i.qtyLabel ? ": " + i.qtyLabel : ""}`).join("\n");
+    const text = `Lista zakupów (${formatRangeLabel(viewedWeekStart)}):\n` + shoppingRows().map(i => `- ${i.name}${i.qtyLabel ? ": " + i.qtyLabel : ""}`).join("\n");
     copyText(text);
   });
 
-  function buildPrintableWeekHtml() {
-    const rows = shoppingRows();
-    const days = weekDates().map(d => {
-      const dateISO = isoDate(d);
-      const dayMeals = weekPlan[dateISO] || {};
-      const mealsHtml = activeMealRows().map(({ meal, person }) => {
-        const entries = dayMeals[slotKey(meal, person)] || [];
-        if (!entries.length) return "";
-        const names = entries.map(entry => {
-          const r = getEntryRecipe(entry);
-          return r ? `${escapeHtml(r.name)}${entry.portions > 1 ? ` (×${entry.portions})` : ""}` : null;
-        }).filter(Boolean).join(", ");
-        if (!names) return "";
-        return `<div><strong>${meal} (${person}):</strong> ${names}</div>`;
-      }).join("");
-      return `<section><h3>${DAY_NAMES_FULL[d.getDay()]} ${formatDayNum(d)}</h3>${mealsHtml || "<div>—</div>"}</section>`;
-    }).join("");
-    const shoppingHtml = rows.length
-      ? `<ul>${rows.map(i => `<li>${escapeHtml(i.name)}${i.qtyLabel ? " — " + escapeHtml(i.qtyLabel) : ""}</li>`).join("")}</ul>`
-      : "<p>Brak zaplanowanych posiłków.</p>";
-    return `<!doctype html><html lang="pl"><head><meta charset="utf-8"><title>FitGoginki — tydzień ${formatRangeLabel(viewedMonday)}</title>
-    <style>
-      body{font-family:Georgia,serif;max-width:640px;margin:32px auto;padding:0 16px;color:#23201a;}
-      h1{font-size:22px;} h2{font-size:16px;border-bottom:1px solid #ccc;padding-bottom:6px;margin-top:32px;}
-      h3{font-size:14px;margin:14px 0 4px;} section{margin-bottom:6px;}
-      ul{padding-left:18px;} li{margin-bottom:4px;}
-      @media print { body{margin:0;} }
-    </style></head><body>
-    <h1>FitGoginki — plan tygodnia (${formatRangeLabel(viewedMonday)})</h1>
-    ${days}
-    <h2>Lista zakupów</h2>
-    ${shoppingHtml}
-    </body></html>`;
-  }
-  function openPrintableWeek() {
-    try {
-      const html = buildPrintableWeekHtml();
-      const blob = new Blob([html], { type: "text/html" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.target = "_blank";
-      a.rel = "noopener";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      showToast("Otworzono podgląd do druku w nowej karcie — użyj Cmd/Ctrl+P i wybierz „Zapisz jako PDF”.");
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-    } catch (e) {
-      const text = `Plan tygodnia (${formatRangeLabel(viewedMonday)}):\n\n` + shoppingRows().map(i => `- ${i.name}${i.qtyLabel ? ": " + i.qtyLabel : ""}`).join("\n");
-      openCopyFallback(text);
-    }
-  }
-  document.getElementById("printListBtn").addEventListener("click", openPrintableWeek);
-  document.getElementById("pdfWeekBtn").addEventListener("click", openPrintableWeek);
   document.getElementById("resetCheckedBtn").addEventListener("click", () => {
     checked = new Set(); save(LS_CHECKED, []); renderShopping();
   });
@@ -2514,7 +2545,7 @@
   function periodBounds(type, anchor) {
     const d = new Date(anchor); d.setHours(0, 0, 0, 0);
     if (type === "day") return { start: d, end: d };
-    if (type === "week") { const start = mondayOf(d); return { start, end: addDays(start, 6) }; }
+    if (type === "week") { const start = weekStartOf(d); return { start, end: addDays(start, 6) }; }
     if (type === "month") return { start: new Date(d.getFullYear(), d.getMonth(), 1), end: new Date(d.getFullYear(), d.getMonth() + 1, 0) };
     if (type === "quarter") { const q = Math.floor(d.getMonth() / 3); return { start: new Date(d.getFullYear(), q * 3, 1), end: new Date(d.getFullYear(), q * 3 + 3, 0) }; }
     return { start: new Date(d.getFullYear(), 0, 1), end: new Date(d.getFullYear(), 11, 31) };
