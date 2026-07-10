@@ -482,6 +482,7 @@
     background: var(--bg); color: var(--ink); font: inherit;
   }
   .shop-item .edit-btn, .shop-item .reset-btn { border: none; background: none; color: var(--ink-soft); font-size: 13px; padding: 4px; flex: none; }
+  .shop-item .undo-btn { border: 1px solid var(--line); background: none; color: var(--accent); font-size: 12px; font-weight: 600; padding: 4px 8px; border-radius: 8px; flex: none; white-space: nowrap; }
   .shop-item .reset-name-btn { border: none; background: none; color: var(--ink-soft); font-size: 11px; padding: 0 0 0 6px; }
   .shop-item .qty.overridden { color: var(--spice); font-weight: 700; }
 
@@ -2414,6 +2415,31 @@
     return `<select class="cat-select">${SHOP_CATEGORIES.map(c => `<option value="${c}" ${c === current ? "selected" : ""}>${c}</option>`).join("")}</select>`;
   }
 
+  // Not a real product category — a status bucket rendered after all real categories, holding
+  // every checked-off item regardless of its actual category (see renderShopping). Kept out of
+  // SHOP_CATEGORIES so it never shows up as a selectable option in the category-override dropdown.
+  const BOUGHT_CATEGORY = "Kupione";
+
+  function renderCategoryGroup(category, items) {
+    const isCollapsed = collapsedShopCategories.has(category);
+    const group = document.createElement("div");
+    group.className = "shop-category-group";
+    const heading = document.createElement("button");
+    heading.type = "button";
+    heading.className = "shop-category-heading" + (isCollapsed ? " collapsed" : "");
+    heading.setAttribute("aria-expanded", String(!isCollapsed));
+    heading.innerHTML = `<span class="chevron">▾</span>${escapeHtml(category)}<span class="cat-count">${items.length}</span>`;
+    heading.addEventListener("click", () => {
+      if (collapsedShopCategories.has(category)) collapsedShopCategories.delete(category);
+      else collapsedShopCategories.add(category);
+      saveLocal(LS_SHOP_COLLAPSED_CATEGORIES, Array.from(collapsedShopCategories));
+      renderShopping();
+    });
+    group.appendChild(heading);
+    if (!isCollapsed) items.forEach(item => group.appendChild(buildShopRow(item)));
+    return group;
+  }
+
   function renderShopping() {
     shopWeekRangeLabel.textContent = formatRangeLabel(viewedWeekStart);
     const rows = shoppingRows();
@@ -2424,32 +2450,20 @@
       shopList.innerHTML = '<div class="empty-state">Dodaj przepisy do planu na ten tydzień (w zakładce „Mój tydzień”) albo dopisz własny produkt poniżej.</div>';
       return;
     }
+    // Checked-off items move into a single mixed "Kupione" bucket at the bottom instead of
+    // staying (sunk) inside their own category — that's what "Cofnij" on each item reverses.
+    const unboughtRows = rows.filter(r => !checked.has(r.key));
+    const boughtRows = rows.filter(r => checked.has(r.key)).sort((a, b) => a.name.localeCompare(b.name, "pl"));
     const byCategory = new Map();
-    rows.forEach(item => {
+    unboughtRows.forEach(item => {
       if (!byCategory.has(item.category)) byCategory.set(item.category, []);
       byCategory.get(item.category).push(item);
     });
     SHOP_CATEGORIES.forEach(category => {
       const items = byCategory.get(category);
-      if (!items || !items.length) return;
-      const isCollapsed = collapsedShopCategories.has(category);
-      const group = document.createElement("div");
-      group.className = "shop-category-group";
-      const heading = document.createElement("button");
-      heading.type = "button";
-      heading.className = "shop-category-heading" + (isCollapsed ? " collapsed" : "");
-      heading.setAttribute("aria-expanded", String(!isCollapsed));
-      heading.innerHTML = `<span class="chevron">▾</span>${escapeHtml(category)}<span class="cat-count">${items.length}</span>`;
-      heading.addEventListener("click", () => {
-        if (collapsedShopCategories.has(category)) collapsedShopCategories.delete(category);
-        else collapsedShopCategories.add(category);
-        saveLocal(LS_SHOP_COLLAPSED_CATEGORIES, Array.from(collapsedShopCategories));
-        renderShopping();
-      });
-      group.appendChild(heading);
-      if (!isCollapsed) items.forEach(item => group.appendChild(buildShopRow(item)));
-      shopList.appendChild(group);
+      if (items && items.length) shopList.appendChild(renderCategoryGroup(category, items));
     });
+    if (boughtRows.length) shopList.appendChild(renderCategoryGroup(BOUGHT_CATEGORY, boughtRows));
   }
 
   function buildShopRow(item) {
@@ -2460,12 +2474,19 @@
       <input type="checkbox" ${isChecked ? "checked" : ""} />
       <span class="name">${escapeHtml(item.name)}${item.nameOverridden ? '<button class="reset-name-btn" type="button" aria-label="Przywróć oryginalną nazwę">↺</button>' : ""}</span>
       <span class="qty tabular ${item.overridden ? "overridden" : ""}">${escapeHtml(item.qtyLabel)}</span>
+      ${isChecked ? '<button class="undo-btn" type="button" aria-label="Cofnij zakup">↺ Cofnij</button>' : ""}
       <button class="edit-btn" type="button" aria-label="Edytuj produkt">✎</button>
       ${item.type === "ingredient" && item.overridden ? '<button class="reset-btn" type="button" aria-label="Przywróć wyliczoną ilość">↺</button>' : ""}
       ${item.type === "custom" ? '<button class="del-btn" type="button" aria-label="Usuń produkt">✕</button>' : ""}
     `;
     row.querySelector('input[type="checkbox"]').addEventListener("change", (e) => {
       if (e.target.checked) checked.add(item.key); else checked.delete(item.key);
+      save(LS_CHECKED, Array.from(checked));
+      renderShopping();
+    });
+    const undoBtn = row.querySelector(".undo-btn");
+    if (undoBtn) undoBtn.addEventListener("click", () => {
+      checked.delete(item.key);
       save(LS_CHECKED, Array.from(checked));
       renderShopping();
     });
