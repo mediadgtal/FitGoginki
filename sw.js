@@ -1,4 +1,4 @@
-const CACHE_NAME = "fitgoginki-v2";
+const CACHE_NAME = "fitgoginki-v3";
 const CORE_ASSETS = [
   "./",
   "./index.html",
